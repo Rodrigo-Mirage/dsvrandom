@@ -16,6 +16,12 @@ module PickupRandomizer
   }
   RANDOMIZABLE_VILLAGER_NAMES = VILLAGER_NAME_TO_EVENT_FLAG.keys
   
+  OOE_HINTS = {
+    "villager" => Array.new(0,nil),
+    "custos" => Array.new(0,nil),
+    "dominus" => Array.new(0,nil)
+  }
+
   PORTRAIT_NAME_TO_DATA = {
     :portrait_city_of_haze =>    {subtype: 0x1A, area_index: 1, sector_index: 0, room_index: 0x1A},
     :portrait_sandy_grave =>     {subtype: 0x1A, area_index: 3, sector_index: 0, room_index: 0},
@@ -348,6 +354,11 @@ module PickupRandomizer
     # Now actually place the pickups in the locations we decided on, and write to the spoiler log.
     already_seen_room_strs = []
     sphere_index = 0
+
+    OOE_HINTS["villager"] = Array.new(0,nil)
+    OOE_HINTS["custos"] =   Array.new(0,nil)
+    OOE_HINTS["dominus"] =  Array.new(0,nil)
+
     @progression_spheres.each do |sphere|
       progress_locations_accessed_in_this_sphere = sphere[:progress_locs]
       doors_accessed_in_this_sphere = sphere[:doors]
@@ -369,6 +380,11 @@ module PickupRandomizer
         if nonrandomized_item_locations.has_key?(location)
           spoiler_str += " (Not randomized)"
         end
+
+        if GAME == "ooe"
+          set_ooe_hint_string(location, pickup_global_id)
+        end
+
         spoiler_log.puts spoiler_str
         puts spoiler_str if verbose
       end
@@ -384,6 +400,11 @@ module PickupRandomizer
       
       sphere_index += 1
     end
+
+    if GAME == "ooe"
+      set_ooe_hints()
+    end
+
   end
   
   def decide_progression_pickups_for_random_fill(pickups_available, locations_available, locations_accessible_at_start: nil)
@@ -979,6 +1000,128 @@ module PickupRandomizer
     return spoiler_str
   end
   
+  def set_ooe_hint_string(location, pickup_global_id)
+    type = ""
+    if RANDOMIZABLE_VILLAGER_NAMES.include?(pickup_global_id)
+      # Villager
+      # Remove the word villager and capitalize the name.
+      pickup_str = pickup_global_id[8..-1].capitalize
+      type = "villager"
+    else
+      if checker.defs.invert[pickup_global_id].to_s.include? "custos"
+        pickup_str = checker.defs.invert[pickup_global_id].to_s
+        type = "custos"
+      elsif checker.defs.invert[pickup_global_id].to_s.include? "dominus"
+        pickup_str = checker.defs.invert[pickup_global_id].to_s
+        type = "dominus"
+      end
+    end
+    if pickup_str != nil
+      pickup_str = pickup_str.tr("_", " ").split.map do |word|
+        if ["of", "to"].include?(word)
+          word
+        else
+          word.capitalize
+        end
+      end.join(" ")
+    else 
+      return ""
+    end
+    
+    location =~ /^(\h\h)-(\h\h)-(\h\h)_(\h+)$/
+    area_index, sector_index, room_index, entity_index = $1.to_i(16), $2.to_i(16), $3.to_i(16), $4.to_i(16)
+    if SECTOR_INDEX_TO_SECTOR_NAME[area_index]
+      area_name = SECTOR_INDEX_TO_SECTOR_NAME[area_index][sector_index]
+      if area_name == "Condemned Tower & Mine of Judgment"
+        if MapRandomizer::CONDEMNED_TOWER_ROOM_INDEXES.include?(room_index)
+          area_name = "Condemned Tower"
+        else
+          area_name = "Mine of Judgment"
+        end
+      end
+    else
+      area_name = AREA_INDEX_TO_AREA_NAME[area_index]
+    end
+    is_enemy_str = checker.enemy_locations.include?(location) ? " (Boss)" : ""
+    is_event_str = checker.event_locations.include?(location) ? " (Event)" : ""
+    is_easter_egg_str = checker.easter_egg_locations.include?(location) ? " (Easter Egg)" : ""
+    is_hidden_str = checker.hidden_locations.include?(location) ? " (Hidden)" : ""
+    is_mirror_str = checker.mirror_locations.include?(location) ? " (Mirror)" : ""
+    location_str = "#{area_name}"
+    
+    index = OOE_HINTS[type].nil? ? 0 : OOE_HINTS[type].length()
+    OOE_HINTS[type][index] = "#{pickup_str}/#{location_str}"
+  end
+
+  def set_ooe_hints
+
+    hints = {}
+    for i in 0..2
+      
+      first_villager  = OOE_HINTS["villager"][i].split("/")[0]
+      second_villager = OOE_HINTS["villager"][i+3].split("/")[0]
+      second_villager_location = OOE_HINTS["villager"][i+3].split("/")[1]
+
+      custos_name     = OOE_HINTS["custos"][i].split("/")[0]
+      custos_location = OOE_HINTS["custos"][i].split("/")[1]
+
+      hints[first_villager] = "I heard #{second_villager} is in #{second_villager_location}\n"
+      hints[second_villager] = "You will find #{custos_name} is at #{custos_location}"
+      
+      first_villager  = OOE_HINTS["villager"][i+6].split("/")[0]
+      second_villager = OOE_HINTS["villager"][i+9].split("/")[0]
+      second_villager_location = OOE_HINTS["villager"][i+9].split("/")[1]
+
+      dominus_name     = OOE_HINTS["dominus"][i].split("/")[0]
+      dominus_location = OOE_HINTS["dominus"][i].split("/")[1]
+
+      hints[first_villager] = "I heard #{second_villager} is in #{second_villager_location}\n"
+      hints[second_villager] = "You will find #{dominus_name} is at #{dominus_location}"
+
+    end
+
+    replaces = {
+      "Jacob"   => "This peddler seemed",
+      "Abram"   => "Once a common thief",
+      "Laura"   => "She places her",
+      "Eugen"   => "A quiet, gentle man",
+      "Aeon"    => "A confident chef",
+      "Marcel"  => "Hearing rumors",
+      "George"  => "Dracula's legend enticed",
+      "Serge"   => "Irina's son looks",
+      "Anna"    => "Irina's daughter ",
+      "Monica"  => "This young girl ",
+      "Irina"   => "Her children are",
+      "Daniela" => "She appeared in"
+    }
+
+    events = game.text_database.text_list[TEXT_REGIONS["Menus 2"]]
+    intro_text = game.text_database.text_list[INTRO_TEXT_ID]
+    events -= [intro_text]
+
+
+    spoiler_log.puts "\nHints:\n"
+    events.each do |text|      
+      # Remove button icons from the string so they don't screw up the line length.
+      hints.each_key do |key| 
+        if text.decoded_string.include?replaces[key]
+          if text.decoded_string.length < 600
+            final_string = "#{hints[key]}"
+            
+            text.decoded_string = final_string
+            spoiler_log.puts "  %-30s %s" % [key+":", final_string]
+
+          end
+
+        end
+
+      end
+
+    end
+    
+    game.text_database.write_to_rom()
+  end
+
   def output_map_rando_error_debug_info
     return unless options[:randomize_maps]
     
